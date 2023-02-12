@@ -10,10 +10,12 @@
 #include <mpi.h>
 #include <stdio.h>
 
-int main(int argc, char** argv) {
+int main(int argc, char **argv)
+{
   // Initialize the MPI environment.
   MPI_Init(&argc, &argv);
 
+  int *test = (int)malloc(sizeof(int) * 100000);
   // Get the number of processes
   int nprocs;
   MPI_Comm_size(MPI_COMM_WORLD, &nprocs);
