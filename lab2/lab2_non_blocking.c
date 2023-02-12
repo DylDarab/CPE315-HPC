@@ -78,44 +78,94 @@ int main(int argc, char **argv)
 
     colsPerProcess = cols / (size - 1);
     int latestIndex = 0;
-    result = (double *)malloc(rows * cols * sizeof(double));
+    int reqCount = 0;
+    MPI_Request reqs[size][1000];
+    MPI_Request reqs2[1000];
     for (int i = 1; i < size; i++)
     {
-      MPI_Send(&rows, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-      MPI_Send(&cols, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
+      reqCount = 0;
+      MPI_Isend(&rows, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &reqs[i][reqCount++]);
+      MPI_Isend(&cols, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &reqs[i][reqCount++]);
 
       if (i == size - 1)
       {
         colsPerProcess = cols - (colsPerProcess * (size - 2));
       }
+      else
+      {
+        colsPerProcess = cols / (size - 1);
+      }
 
-      MPI_Send(&colsPerProcess, 1, MPI_INT, i, 0, MPI_COMM_WORLD);
-      MPI_Send(&matrixA[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-      MPI_Send(&matrixB[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD);
-
-      MPI_Recv(&result[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      MPI_Isend(&colsPerProcess, 1, MPI_INT, i, 0, MPI_COMM_WORLD, &reqs[i][reqCount++]);
+      MPI_Isend(&matrixA[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &reqs[i][reqCount++]);
+      MPI_Isend(&matrixB[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &reqs[i][reqCount++]);
 
       latestIndex += colsPerProcess * rows;
+    }
+
+    for (int i = 1; i < size; i++)
+    {
+      for (int j = 0; j < reqCount; j++)
+      {
+        MPI_Wait(&reqs[i][j], MPI_STATUS_IGNORE);
+      }
+    }
+
+    result = (double *)malloc(rows * cols * sizeof(double));
+
+    reqCount = 0;
+    latestIndex = 0;
+    for (int i = 1; i < size; i++)
+    {
+      if (i == size - 1)
+      {
+        colsPerProcess = cols - (colsPerProcess * (size - 2));
+      }
+      else
+      {
+        colsPerProcess = cols / (size - 1);
+      }
+
+      MPI_Irecv(&result[latestIndex], colsPerProcess * rows, MPI_DOUBLE, i, 0, MPI_COMM_WORLD, &reqs2[reqCount++]);
+
+      latestIndex += colsPerProcess * rows;
+    }
+    for (int i = 0; i < reqCount; i++)
+    {
+      MPI_Wait(&reqs2[i], MPI_STATUS_IGNORE);
     }
   }
   else
   {
-    MPI_Recv(&rows, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    MPI_Recv(&cols, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    MPI_Recv(&colsPerProcess, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Request reqs[6];
+
+    MPI_Irecv(&rows, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &reqs[0]);
+    MPI_Irecv(&cols, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &reqs[1]);
+    MPI_Irecv(&colsPerProcess, 1, MPI_INT, 0, 0, MPI_COMM_WORLD, &reqs[2]);
+
+    MPI_Wait(&reqs[0], MPI_STATUS_IGNORE);
+    MPI_Wait(&reqs[1], MPI_STATUS_IGNORE);
+    MPI_Wait(&reqs[2], MPI_STATUS_IGNORE);
 
     printf("rank: %d, process %d cols\n", rank, colsPerProcess);
 
     matrixA = (double *)malloc(rows * colsPerProcess * sizeof(double));
     matrixB = (double *)malloc(rows * colsPerProcess * sizeof(double));
-    result = (double *)malloc(rows * colsPerProcess * sizeof(double));
 
-    MPI_Recv(&matrixA[0], colsPerProcess * rows, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    MPI_Recv(&matrixB[0], colsPerProcess * rows, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    MPI_Irecv(matrixA, rows * colsPerProcess, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &reqs[3]);
+
+    MPI_Irecv(matrixB, rows * colsPerProcess, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &reqs[4]);
+
+    MPI_Wait(&reqs[3], MPI_STATUS_IGNORE);
+    MPI_Wait(&reqs[4], MPI_STATUS_IGNORE);
+
+    result = (double *)malloc(rows * colsPerProcess * sizeof(double));
 
     addMatrix(matrixA, matrixB, result, rows, colsPerProcess);
 
-    MPI_Send(&result[0], colsPerProcess * rows, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
+    MPI_Isend(result, rows * colsPerProcess, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD, &reqs[5]);
+
+    MPI_Wait(&reqs[5], MPI_STATUS_IGNORE);
   }
 
   if (rank == 0)
